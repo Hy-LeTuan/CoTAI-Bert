@@ -2,6 +2,7 @@ import json
 import pandas as pd
 import os
 import regex
+import time
 
 
 def process_original_comments():
@@ -48,13 +49,19 @@ def clean_url(comment):
     matches = regex.findall(expression, comment)
 
     for word in matches:
-        comment = comment.replace(word, '')
+        comment = comment.replace(word, "<link>")
 
     return comment
 
 
-def get_person(comment):
-    expression = regex.compile(r"")
+def clean_person(comment):
+    expression = regex.compile(r"^(?:\p{Lu}[\p{Ll}]*[\s])+")
+    matches = regex.findall(expression, comment)
+
+    for word in matches:
+        comment = comment.replace(word, "<person> ")
+
+    return comment
 
 
 def clean_data():
@@ -72,7 +79,12 @@ def clean_data():
 
         for object in object_list:
             content = object["content"]
+
+            content = clean_person(content)
+            content = clean_url(content)
+
             print(content)
+            time.sleep(0.5)
 
         json_file.close()
 

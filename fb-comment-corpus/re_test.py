@@ -12,6 +12,13 @@ complicate_res = regex.findall(expression, complicate_comment)
 tagged_name = regex.findall(expression_tagged, tagged_comment)
 
 print(tagged_name)
+print("after removing---------")
+
+for word in tagged_name:
+    tagged_name = tagged_comment.replace(word, '')
+
+print(tagged_name)
+
 
 # for word in complicate_res:
 #     print(word)
