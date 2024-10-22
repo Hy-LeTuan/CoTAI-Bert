@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import regex
 import time
+from tqdm import tqdm
 
 
 def process_original_comments():
@@ -43,19 +44,35 @@ def process_original_comments():
         fw.close()
 
 
+def split_sentence(comment):
+    expression = regex.compile(r"(.*(?<=[\p{Ll}])\.\s+)")
+    splitted = regex.split(expression, comment)
+
+    res = []
+
+    for sentence in splitted:
+        if sentence != "":
+            sentence = sentence.strip()
+
+            res.append(sentence)
+
+    return res
+
+
 def clean_url(comment):
     expression = regex.compile(
         r"(?:link.*?)?https?:\/\/[\w\-\.\/\@\?\#\:\=\&\%]+")
     matches = regex.findall(expression, comment)
 
     for word in matches:
-        comment = comment.replace(word, "<link>")
+        comment = comment.replace(word, "<link> ")
 
     return comment
 
 
 def clean_person(comment):
-    expression = regex.compile(r"^(?:\p{Lu}[\p{Ll}]*[\s])+")
+    expression = regex.compile(r"^(?:\p{Lu}[\p{Ll}]*[\W]*?[\s]){2,}")
+
     matches = regex.findall(expression, comment)
 
     for word in matches:
@@ -64,31 +81,58 @@ def clean_person(comment):
     return comment
 
 
+def clean_non_word(comment):
+    pass
+
+
+def clean_phone_number(comment):
+    phone_number_expression = regex.compile(r"\+?0?\d{7,10}")
+    matches = regex.findall(phone_number_expression, comment)
+
+    for word in matches:
+        comment = comment.replace(word, "")
+
+    return comment
+
+
+def clean_general(comment):
+    illegal_content = regex.compile(r"^[\?\.\#\@\-\+\=\$\^\&,]+$")
+    if comment == "" or comment == "\n":
+        return "<empty>"
+    elif len(regex.findall(illegal_content, comment)) != 0:
+        return "<illegal>"
+    else:
+        return comment
+
+
 def clean_data():
     root_dir = "./json_data"
-    output_dir = "./json_data_cleaned"
-    output_content = {
-        "id": [],
-        "content": []
-    }
-    for filename in os.listdir(root_dir):
+    output_dir = "./data_cleaned"
+
+    for x, filename in tqdm(enumerate(os.listdir(root_dir))):
         json_file = open(os.path.join(root_dir, filename),
                          "r", encoding="utf-8")
 
+        x = str(x).zfill(5)
+        output_file = open(os.path.join(
+            output_dir, f"fb_{x}.txt"), "w", encoding="utf-8")
+
+        # get all records in json file
         object_list = json.load(json_file)
 
-        for object in object_list:
+        for i, object in enumerate(object_list):
             content = object["content"]
 
-            content = clean_person(content)
             content = clean_url(content)
+            content = clean_phone_number(content)
+            content = clean_person(content)
 
-            print(content)
-            time.sleep(0.5)
+            content = clean_general(content)
+
+            if content != "<empty>" and content != "<illegal>":
+                output_file.write(f"{content}\n")
 
         json_file.close()
-
-        break
 
 
 if __name__ == "__main__":
