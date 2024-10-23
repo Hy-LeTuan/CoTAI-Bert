@@ -44,21 +44,6 @@ def process_original_comments():
         fw.close()
 
 
-def split_sentence(comment):
-    expression = regex.compile(r"(.*(?<=[\p{Ll}])\.\s+)")
-    splitted = regex.split(expression, comment)
-
-    res = []
-
-    for sentence in splitted:
-        if sentence != "":
-            sentence = sentence.strip()
-
-            res.append(sentence)
-
-    return res
-
-
 def clean_url(comment):
     expression = regex.compile(
         r"(?:link.*?)?https?:\/\/[\w\-\.\/\@\?\#\:\=\&\%]+")
