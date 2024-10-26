@@ -37,9 +37,9 @@ def clean_phone_number(comment):
     return comment
 
 
-def clean_general(comment):
+def clean_general(comment, ignore_newline=True):
     illegal_content = regex.compile(r"^[\?\.\#\@\-\+\=\$\^\&,]+$")
-    if comment == "" or comment == "\n":
+    if comment == "" or (ignore_newline == True and comment == "\n"):
         return "<empty>"
     elif len(regex.findall(illegal_content, comment)) != 0:
         return "<illegal>"
