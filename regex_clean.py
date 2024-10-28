@@ -1,4 +1,5 @@
 import regex as regex
+from tokenizers import Regex
 
 
 class RegexCleaner:
