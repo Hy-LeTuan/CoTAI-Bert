@@ -2,6 +2,21 @@ import torch.nn as nn
 import torch
 
 
+def get_alibi_slope(num_heads):
+    x = (2 ** 8) ** (1 / num_heads)
+    return (
+        torch.tensor([1 / x ** (i + 1) for i in range(num_heads)])
+        .unsqueeze(-1)
+        .unsqueeze(-1)
+    )
+
+
+def get_alibi_weight(seq_len):
+    x = torch.arange(seq_len)[None, :]
+    y = torch.arange(seq_len)[:, None]
+    return x - y
+
+
 class GQAAttention(nn.Module):
     def __init__(self, num_heads, num_kv_heads, head_dim, hidden_state):
         super().__init__()
@@ -19,6 +34,9 @@ class GQAAttention(nn.Module):
 
         # final projection to turn back to hidden state
         self.o_proj = nn.Linear(num_heads*head_dim, hidden_state)
+
+        # alibi weight and slope
+        self.register_buffer("m", get_alibi_slope(num_heads=num_heads))
 
     def repeat_kv(self, kv):
         """
@@ -76,6 +94,7 @@ class GQAAttention(nn.Module):
 
 class MLP(nn.Module):
     def __init__(self, hidden_state):
+        # https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py#L231
         super().__init__()
         self.hidden_state = hidden_state
 

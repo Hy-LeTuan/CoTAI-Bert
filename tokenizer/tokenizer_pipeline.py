@@ -10,9 +10,12 @@ from tokenizers import (
     AddedToken,
 )
 from tokenizers.normalizers import Normalizer
-from transformers import AutoTokenizer, PreTrainedTokenizerFast
+from transformers import PreTrainedTokenizerFast
+import gc
 from datasets import load_dataset
+import time
 
+start = time.time()
 
 # initialize tokenizer
 tokenizer = Tokenizer(models.BPE(unk_token=None, fuse_unk=False, dropout=None,
@@ -50,22 +53,29 @@ unk = AddedToken(content="[UNK]", lstrip=False,
                  normalized=False, rstrip=False, single_word=True)
 
 # create dataset and initialize generator
+# dataset = load_dataset(
+#     "data", streaming=True)
 dataset = load_dataset(
-    "../data_all/data", streaming=True, spilt="train")
-batch_size = 15000
+    "arrow", data_files=["../data_all//data/data_00000.arrow"], streaming=True)
+batch_size = 50000
 
 
 def get_training_corpus():
     content = []
-    for row in dataset:
+    for row in dataset["train"]:
         if len(content) == batch_size:
             yield content
+            del content
+            gc.collect()
             content = []
         else:
             content.append(row["text"])
 
     if content:
         yield content
+        del content
+        gc.collect()
+        content = []
 
 
 training_corpus = get_training_corpus()
@@ -121,3 +131,7 @@ wrapped_tokenizer = PreTrainedTokenizerFast(
 )
 wrapped_tokenizer.model_max_length = max_token_length
 wrapped_tokenizer.save_pretrained("./tokenizer", legacy_format=False)
+
+end = time.time()
+
+print(f"total time: {end - start}")
