@@ -1,0 +1,14 @@
+env
+*data/
+*data*/
+data.csv
+data_vi.txt
+env
+.env
+constants*
+temp
+data.txt
+__pycache__
+*/tokenizer-50k/*
+*merges.txt*
+merges.txt
