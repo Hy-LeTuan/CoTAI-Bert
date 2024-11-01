@@ -1,9 +1,0 @@
-env
-*data/
-*data*/
-data.csv
-data_vi.txt
-env
-.env
-constants*
-temp
