@@ -10,5 +10,7 @@ temp
 data.txt
 __pycache__
 */tokenizer-50k/*
+tokenizer-50k
 *merges.txt*
-merges.txt
+*merges.txt
+final

@@ -44,6 +44,13 @@ class RegexCleaner:
         else:
             return comment
 
+    def clean_trivial_sentences(self, comment):
+        words = comment.split(" ")
+        if len(words) < 2:
+            return "<empty>"
+        else:
+            return comment
+
     def split_sentence(self, comment):
         """
         split sentences by punctuations. 

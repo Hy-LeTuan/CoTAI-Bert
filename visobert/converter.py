@@ -26,3 +26,13 @@ def convert_to_arrow(dataset, output_dir, max_row_per_line, prefix_digit=5, type
 
             output_file_counter += 1
             content = []
+
+
+def convert_content_and_write_to_arrow(content, output_filepath, text_column="text", compression="gzip"):
+    table = pa.Table.from_arrays(
+        [pa.array(content)], names=[text_column])
+
+    with pa.CompressedOutputStream(output_filepath, compression=compression) as stream:
+        writer = pa.RecordBatchStreamWriter(stream, table.schema)
+        writer.write_table(table)
+        writer.close()
