@@ -14,3 +14,6 @@ tokenizer-50k
 *merges.txt*
 *merges.txt
 final
+temp
+num_tokens/*
+num_tokens
