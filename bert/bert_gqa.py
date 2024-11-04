@@ -1,5 +1,7 @@
 import torch.nn as nn
 import torch
+import math
+from linear_rot_embed import RotatoryEmbedding, apply_rotatory_pos_embed
 
 
 def get_alibi_slope(num_heads):
@@ -18,7 +20,7 @@ def get_alibi_weight(seq_len):
 
 
 class GQAAttention(nn.Module):
-    def __init__(self, num_heads, num_kv_heads, head_dim, hidden_state):
+    def __init__(self, num_heads, num_kv_heads, head_dim, hidden_state, base=10000, device="cpu"):
         super().__init__()
         assert num_heads % num_kv_heads == 0, print(
             f"Number of heads {num_heads} is not divisible by number of Key-Value heads {num_kv_heads}")
@@ -31,6 +33,10 @@ class GQAAttention(nn.Module):
         self.q_proj = nn.Linear(hidden_state, num_heads*head_dim)
         self.k_proj = nn.Linear(hidden_state, num_kv_heads * head_dim)
         self.v_proj = nn.Linear(hidden_state, num_kv_heads * head_dim)
+
+        # positional embedding
+        self.rot_embed = RotatoryEmbedding(
+            hidden_state=head_dim, base=base, device=device)
 
         # final projection to turn back to hidden state
         self.o_proj = nn.Linear(num_heads*head_dim, hidden_state)
@@ -53,7 +59,7 @@ class GQAAttention(nn.Module):
 
         return kv.reshape(batch, num_key_value_heads * self.num_groups, slen, head_dim)
 
-    def forward(self, x, **kwargs):
+    def forward(self, x, position_ids):
         bs, seq, _ = x.size()
 
         q = self.q_proj(x).view(bs, seq, self.num_heads,
@@ -63,13 +69,15 @@ class GQAAttention(nn.Module):
         v = self.v_proj(x).view(bs, seq, self.num_kv_heads,
                                 head_dim).transpose(1, 2)
 
+        # apply rotational embedding
+        cos, sin = self.rot_embed(v, position_ids)
+        q, k = apply_rotatory_pos_embed(q, k, cos=cos, sin=sin)
+
         k = self.repeat_kv(k)
         v = self.repeat_kv(v)
 
-        print(f"query: {q.shape}")
-        print(f"key: {k.shape}")
-
-        attn_weights = torch.matmul(q, k.transpose(-1, -2))
+        attn_weights = torch.matmul(
+            q, k.transpose(-1, -2)) / math.sqrt(self.head_dim)
 
         # calculate attention score and upcast to float32
         attn_weights = nn.functional.softmax(
@@ -111,8 +119,9 @@ if __name__ == "__main__":
     head_dim = hidden_state // num_heads
 
     x = torch.randn(4, 128, 512)
+    position_ids = torch.stack([torch.arange(128) for _ in range(4)], dim=0)
 
     att = GQAAttention(num_heads=num_heads, num_kv_heads=num_kv_heads,
                        head_dim=head_dim, hidden_state=hidden_state)
 
-    att(x)
+    att(x, position_ids=position_ids)
