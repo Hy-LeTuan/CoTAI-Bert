@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch
 import math
-from linear_rot_embed import RotatoryEmbedding, apply_rotatory_pos_embed
+from NLPDataCollection.bert.rotatory_positional_embedding import RotatoryEmbedding, apply_rotatory_pos_embed
 
 
 def get_alibi_slope(num_heads):
