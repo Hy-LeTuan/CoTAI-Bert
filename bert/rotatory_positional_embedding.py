@@ -31,6 +31,8 @@ class RotatoryEmbedding(nn.Module):
     def __init__(self, hidden_state, base, device="cpu"):
         super().__init__()
 
+        self.device = device
+
         # initialize theta frequency
         inv_freq = get_inv_freq(
             hidden_state=hidden_state, base=base, device=device)
@@ -40,7 +42,8 @@ class RotatoryEmbedding(nn.Module):
     def forward(self, x, position_ids):
         inv_freq_expanded = self.inv_freq[None,
                                           :, None].float().expand(position_ids.shape[0], -1, -1)
-        position_ids_expanded = position_ids[:, None, :].float()
+        position_ids_expanded = position_ids[:,
+                                             None, :].float()
 
         # [[theta_1 * m0, theta_1 * m1, theta_1 * m2....]
         # [theta_2 * m0, theta_2 * m1, theta_2 * m2....]]
@@ -51,7 +54,7 @@ class RotatoryEmbedding(nn.Module):
         cos = emb.cos()
         sin = emb.sin()
 
-        return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
+        return cos.to(dtype=x.dtype).to(self.device), sin.to(dtype=x.dtype).to(self.device)
 
 
 if __name__ == "__main__":
