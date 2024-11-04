@@ -16,8 +16,9 @@ class MLP(nn.Module):
 
 
 if __name__ == "__main__":
-    x = torch.randn(4, 128, 512)
-    mlp = MLP(mlp_dim=3092, hidden_state=512)
+    device = "cuda"
+    x = torch.randn(4, 128, 512).to(device)
+    mlp = MLP(mlp_dim=3092, hidden_state=512).to(device)
 
     res = mlp(x)
     print(res.shape)

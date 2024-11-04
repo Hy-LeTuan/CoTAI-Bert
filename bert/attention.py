@@ -86,17 +86,12 @@ class GQAAttention(nn.Module):
         # attn_weights = nn.functional.dropout(
         #     attn_weights, p=self.attention_dropout, training=self.training)
 
-        print(
-            f"Attention score: {attn_weights.shape} || type: {attn_weights.dtype}")
-
         # calculate final attention output
         attn_output = torch.matmul(attn_weights, v)
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(bs, seq, -1)
 
         attn_output = self.o_proj(attn_output)
-        print(
-            f"Attention output: {attn_output.shape} || type: {attn_weights.dtype}")
 
         return attn_output
 
