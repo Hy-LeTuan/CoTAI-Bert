@@ -311,6 +311,7 @@ class FlashGQAAttention(nn.Module):
         print(attn_output.shape)
 
 
+# FEED FORWARD NETWORK
 class MLP(nn.Module):
     def __init__(self, mlp_dim, hidden_state):
         super().__init__()
@@ -388,13 +389,26 @@ class YarnBertBlock(BertBlock):
 
 
 class CotaiBert(nn.Module):
-    def __init__(self, num_blocks, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device, original_max_position_embeddings=128, max_position_embeddings=256, scale=16, beta=32, alpha=1, mscale=0.707, yarn=False):
+    def __init__(self, num_blocks, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash=False, device="cpu", original_max_position_embeddings=128, max_position_embeddings=256, scale=16, beta=32, alpha=1, mscale=0.707, yarn=False):
         super().__init__()
 
         if yarn:
-            self.blocks = nn.ModuleList()
+            self.blocks = nn.ModuleList([BertBlock(id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device).to(device) for id in range(num_blocks)])
         else:
-            self.blocks = nn.ModuleList()
+            self.blocks = nn.ModuleList([YarnBertBlock(id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device, original_max_position_embeddings=original_max_position_embeddings, max_position_embeddings=max_position_embeddings, beta=32, alpha=1, scale=16, mscale=0.707).to(device) for id in range(num_blocks)])
+
+    def _forward(self, x, position_ids, mask=None):
+        for block in self.blocks:
+            x = block(x, position_ids, mask)
+
+        return x
+
+    def forward(self, x, position_ids, mask=None):
+        # recursion model for double passing through the models
+        x = self._forward(x, position_ids, mask)
+        x = self._forward(x, position_ids, mask)
+
+        return x
 
 
 if __name__ == "__main__":
@@ -407,21 +421,18 @@ if __name__ == "__main__":
     head_dim = hidden_state // num_heads
     base = 10000
     batch_size = 4
-    device = "cpu"
+    device = "cuda"
     flash = False
+    num_blocks = 15
+    yarn = False
 
-    block = BertBlock(0, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device)
-    yarn_block = YarnBertBlock(0, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device, original_max_position_embeddings=original_max_position_embeddings, max_position_embeddings=max_position_embeddings, beta=32, alpha=1, scale=16, mscale=0.707)
+    model = CotaiBert(num_blocks, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash=False, device="cpu", original_max_position_embeddings=128, max_position_embeddings=256, scale=16, beta=32, alpha=1, mscale=0.707, yarn=yarn)
 
     # initialize input
     x = torch.randn(batch_size, original_max_position_embeddings, hidden_state)
     position_ids = torch.stack([torch.arange(original_max_position_embeddings) for _ in range(batch_size)])
 
-    output = block(x, position_ids, mask=None)
-    yarn_output = yarn_block(x, position_ids, mask=None)
+    model_output = model(x, position_ids, mask=None).to(device)
 
-    print("output----")
-    print(output.shape)
-
-    print("yarn output----")
-    print(yarn_output.shape)
+    print("model output----")
+    print(model_output.shape)
