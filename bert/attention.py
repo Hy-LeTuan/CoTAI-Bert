@@ -2,7 +2,7 @@ from flash_attn import flash_attn_func
 import torch.nn as nn
 import torch
 import math
-from rotatory_positional_embedding import RotatoryEmbedding, apply_rotatory_pos_embed
+from rotatory_positional_embedding import RotatoryEmbedding, apply_rotatory_pos_embed, YarnRotatoryEmbedding
 
 
 def get_alibi_slope(num_heads):
@@ -23,6 +23,10 @@ def get_alibi_weight(seq_len):
 class GQAAttention(nn.Module):
     def __init__(self, num_heads, num_kv_heads, head_dim, hidden_state, base=10000, device="cpu"):
         super().__init__()
+        self.hidden_state = hidden_state
+        self.base = base
+        self.device = device
+
         assert num_heads % num_kv_heads == 0, print(
             f"Number of heads {num_heads} is not divisible by number of Key-Value heads {num_kv_heads}")
 
@@ -31,7 +35,7 @@ class GQAAttention(nn.Module):
         self.num_groups = num_heads // num_kv_heads  #
         self.head_dim = head_dim
 
-        self.q_proj = nn.Linear(hidden_state, num_heads*head_dim)
+        self.q_proj = nn.Linear(hidden_state, num_heads * head_dim)
         self.k_proj = nn.Linear(hidden_state, num_kv_heads * head_dim)
         self.v_proj = nn.Linear(hidden_state, num_kv_heads * head_dim)
 
@@ -40,7 +44,7 @@ class GQAAttention(nn.Module):
             hidden_state=head_dim, base=base, device=device)
 
         # final projection to turn back to hidden state
-        self.o_proj = nn.Linear(num_heads*head_dim, hidden_state)
+        self.o_proj = nn.Linear(num_heads * head_dim, hidden_state)
 
         # alibi weight and slope
         self.register_buffer("m", get_alibi_slope(num_heads=num_heads))
@@ -85,7 +89,6 @@ class GQAAttention(nn.Module):
             attn_weights, dim=-1, dtype=torch.float32).to(q.dtype)
         # attn_weights = nn.functional.dropout(
         #     attn_weights, p=self.attention_dropout, training=self.training)
-
         # calculate final attention output
         attn_output = torch.matmul(attn_weights, v)
         attn_output = attn_output.transpose(1, 2).contiguous()
@@ -94,6 +97,16 @@ class GQAAttention(nn.Module):
         attn_output = self.o_proj(attn_output)
 
         return attn_output
+
+
+class YarnGQAAttention(GQAAttention):
+    def __init__(self, *args, original_max_position_embeddings=128, scale=16, beta=32, alpha=1, mscale=0.707):
+        super().__init__(*args)
+        self.rot_embed = YarnRotatoryEmbedding(
+            self.hidden_state, self.base, 2048, self.device, original_max_position_embeddings=original_max_position_embeddings, scale=scale, beta=beta, alpha=alpha, mscale=mscale)
+
+        def forward(self, x, position_ids):
+            return super().forward(x, position_ids)
 
 
 class FlashGQAAttention(nn.Module):
@@ -116,7 +129,7 @@ class FlashGQAAttention(nn.Module):
         self.num_groups = num_heads // num_kv_heads  #
         self.head_dim = head_dim
 
-        self.q_proj = nn.Linear(hidden_state, num_heads*head_dim)
+        self.q_proj = nn.Linear(hidden_state, num_heads * head_dim)
         self.k_proj = nn.Linear(hidden_state, num_kv_heads * head_dim)
         self.v_proj = nn.Linear(hidden_state, num_kv_heads * head_dim)
 
@@ -125,7 +138,7 @@ class FlashGQAAttention(nn.Module):
             hidden_state=head_dim, base=base, device=device)
 
         # final projection to turn back to hidden state
-        self.o_proj = nn.Linear(num_heads*head_dim, hidden_state)
+        self.o_proj = nn.Linear(num_heads * head_dim, hidden_state)
 
         # alibi weight and slope
         self.register_buffer("m", get_alibi_slope(num_heads=num_heads))
@@ -175,5 +188,7 @@ if __name__ == "__main__":
 
     att = FlashGQAAttention(num_heads=num_heads, num_kv_heads=num_kv_heads,
                             head_dim=head_dim, hidden_state=hidden_state).to(device)
+
+    yarn_att = YarnGQAAttention(num_heads, num_kv_heads, head_dim, hidden_state, 10000, device, original_max_position_embeddings=128, scale=16, beta=32, alpha=1, mscale=0.707)
 
     att(x, position_ids=position_ids)

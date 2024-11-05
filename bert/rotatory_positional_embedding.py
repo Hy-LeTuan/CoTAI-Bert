@@ -1,4 +1,3 @@
-from turtle import position
 import torch.nn as nn
 import torch
 import math
@@ -143,8 +142,8 @@ class YarnRotatoryEmbedding(RotatoryEmbedding):
         print(bs)
         cos, sin = get_yarn_positional_embed(self.hidden_state, self.original_max_position_embeddings,
                                              self.base, self.scale, self.beta, self.alpha, self.mscale, self.max_position_embeddings)
-        cos = cos[None, :, :].expand(bs,  -1, -1)
-        sin = sin[None, :, :].expand(bs,  -1, -1)
+        cos = cos[None, :, :].expand(bs, -1, -1)
+        sin = sin[None, :, :].expand(bs, -1, -1)
         return cos, sin
 
 

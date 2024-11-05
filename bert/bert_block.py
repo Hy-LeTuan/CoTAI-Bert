@@ -11,7 +11,7 @@ class BertBlock(nn.Module):
         assert hidden_state % num_heads == 0, print(
             f"Hidden state is {hidden_state} not divisible by number of heads: {num_heads}")
 
-        if flash == True and device != "cuda":
+        if flash and device != "cuda":
             raise ValueError("Device must be CUDA to enable flash attention")
 
         super().__init__()
