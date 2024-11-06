@@ -2,7 +2,21 @@ import torch
 import torch.nn as nn
 import math
 import torch.nn.functional as F
-from flash_attn import flash_attn_func
+from flash_attn import flash_attn_func, flash_attn_varlen_func
+from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input
+from transformers.utils import ModelOutput
+
+
+def _get_unpad_data(attention_mask):
+    seqlens_in_batch = attention_mask.sum(dim=-1, dtype=torch.int32)
+    indices = torch.nonzero(attention_mask.flatten(), as_tuple=False).flatten()
+    max_seqlen_in_batch = seqlens_in_batch.max().item()
+    cu_seqlens = F.pad(torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.int32), (1, 0))
+    return (
+        indices,
+        cu_seqlens,
+        max_seqlen_in_batch,
+    )
 
 
 def get_alibi_slope(num_heads):
@@ -18,6 +32,7 @@ def get_alibi_weight(seq_len):
     x = torch.arange(seq_len)[None, :]
     y = torch.arange(seq_len)[:, None]
     return x - y
+
 
 def get_inv_freq(hidden_state, base=10000, device="cpu"):
     assert hidden_state % 2 == 0, print(
@@ -73,7 +88,7 @@ def rotate_half(x):
     x1 = x[..., :x.shape[-1] // 2]
     x2 = x[..., x.shape[-1] // 2:]
 
-    return torch.cat((-x2, x1), dim=-1)
+    return torch.cat((-x2, x1), dim=-1).to(x.device)
 
 
 def apply_rotatory_pos_embed(q, k, cos, sin, unsqueeze_dim=1):
@@ -172,16 +187,16 @@ class GQAAttention(nn.Module):
         self.num_groups = num_heads // num_kv_heads  #
         self.head_dim = head_dim
 
-        self.q_proj = nn.Linear(hidden_state, num_heads * head_dim)
-        self.k_proj = nn.Linear(hidden_state, num_kv_heads * head_dim)
-        self.v_proj = nn.Linear(hidden_state, num_kv_heads * head_dim)
+        self.q_proj = nn.Linear(hidden_state, num_heads * head_dim, bias=False)
+        self.k_proj = nn.Linear(hidden_state, num_kv_heads * head_dim, bias=False)
+        self.v_proj = nn.Linear(hidden_state, num_kv_heads * head_dim, bias=False)
 
         # positional embedding
         self.rot_embed = RotatoryEmbedding(
             hidden_state=head_dim, base=base, device=device)
 
         # final projection to turn back to hidden state
-        self.o_proj = nn.Linear(num_heads * head_dim, hidden_state)
+        self.o_proj = nn.Linear(num_heads * head_dim, hidden_state, bias=False)
 
         # alibi weight and slope
         self.register_buffer("m", get_alibi_slope(num_heads=num_heads))
@@ -201,7 +216,7 @@ class GQAAttention(nn.Module):
 
         return kv.reshape(batch, num_key_value_heads * self.num_groups, slen, head_dim)
 
-    def forward(self, x, position_ids):
+    def forward(self, x, mask, position_ids):
         bs, seq, _ = x.size()
 
         q = self.q_proj(x).view(bs, seq, self.num_heads,
@@ -213,6 +228,8 @@ class GQAAttention(nn.Module):
 
         # apply rotational embedding
         cos, sin = self.rot_embed(v, position_ids)
+        cos = cos.to(self.device)
+        sin = sin.to(self.device)
 
         q, k = apply_rotatory_pos_embed(q, k, cos=cos, sin=sin)
 
@@ -276,21 +293,81 @@ class FlashGQAAttention(nn.Module):
         self.num_groups = num_heads // num_kv_heads  #
         self.head_dim = head_dim
 
-        self.q_proj = nn.Linear(hidden_state, num_heads * head_dim)
-        self.k_proj = nn.Linear(hidden_state, num_kv_heads * head_dim)
-        self.v_proj = nn.Linear(hidden_state, num_kv_heads * head_dim)
+        self.q_proj = nn.Linear(hidden_state, num_heads * head_dim, bias=False)
+        self.k_proj = nn.Linear(hidden_state, num_kv_heads * head_dim, bias=False)
+        self.v_proj = nn.Linear(hidden_state, num_kv_heads * head_dim, bias=False)
 
         # positional embedding
         self.rot_embed = RotatoryEmbedding(
             hidden_state=head_dim, base=base, device=device)
 
         # final projection to turn back to hidden state
-        self.o_proj = nn.Linear(num_heads * head_dim, hidden_state)
+        self.o_proj = nn.Linear(num_heads * head_dim, hidden_state, bias=False)
 
         # alibi weight and slope
         self.register_buffer("m", get_alibi_slope(num_heads=num_heads))
 
-    def forward(self, x, position_ids):
+    def _upad_input(self, query_layer, key_layer, value_layer, attention_mask, query_length):
+        indices_k, cu_seqlens_k, max_seqlen_in_batch_k = _get_unpad_data(attention_mask)
+        batch_size, kv_seq_len, num_key_value_heads, head_dim = key_layer.shape
+
+        key_layer = index_first_axis(key_layer.reshape(batch_size * kv_seq_len, num_key_value_heads, head_dim), indices_k)
+        value_layer = index_first_axis(value_layer.reshape(batch_size * kv_seq_len, num_key_value_heads, head_dim), indices_k)
+        if query_length == kv_seq_len:
+            query_layer = index_first_axis(
+                query_layer.reshape(batch_size * kv_seq_len, self.num_heads, head_dim), indices_k
+            )
+            cu_seqlens_q = cu_seqlens_k
+            max_seqlen_in_batch_q = max_seqlen_in_batch_k
+            indices_q = indices_k
+        elif query_length == 1:
+            max_seqlen_in_batch_q = 1
+            cu_seqlens_q = torch.arange(
+                batch_size + 1, dtype=torch.int32, device=query_layer.device
+            )  # There is a memcpy here, that is very bad.
+            indices_q = cu_seqlens_q[:-1]
+            query_layer = query_layer.squeeze(1)
+        else:
+            # The -q_len: slice assumes left padding.
+            attention_mask = attention_mask[:, -query_length:]
+            query_layer, indices_q, cu_seqlens_q, max_seqlen_in_batch_q = unpad_input(query_layer, attention_mask)
+
+        return (
+            query_layer,
+            key_layer,
+            value_layer,
+            indices_q,
+            (cu_seqlens_q, cu_seqlens_k),
+            (max_seqlen_in_batch_q, max_seqlen_in_batch_k),
+        )
+
+    def _flash_attention_forward(self, query_states, key_states, value_states, attention_mask, query_length):
+        if attention_mask is not None:
+            batch_size = query_states.shape[0]
+            query_states, key_states, value_states, indices_q, cu_seq_lens, max_seq_lens = self._upad_input(query_states, key_states, value_states, attention_mask, query_length)
+            cu_seqlens_q, cu_seqlens_k = cu_seq_lens
+            max_seqlen_in_batch_q, max_seqlen_in_batch_k = max_seq_lens
+
+            attn_output_unpad = flash_attn_varlen_func(
+                query_states,
+                key_states,
+                value_states,
+                cu_seqlens_q=cu_seqlens_q,
+                cu_seqlens_k=cu_seqlens_k,
+                max_seqlen_q=max_seqlen_in_batch_q,
+                max_seqlen_k=max_seqlen_in_batch_k,
+                dropout_p=0.0,
+                softmax_scale=None,
+                causal=False,
+            )
+
+            attn_output = pad_input(attn_output_unpad, indices_q, batch_size, query_length)
+        else:
+            attn_output = flash_attn_func(query_states, key_states, value_states, dropout_p=0.0, softmax_scale=None, causal=False)
+
+        return attn_output
+
+    def forward(self, x, attention_mask, position_ids):
         bs, seq, _ = x.size()
 
         q = self.q_proj(x).view(bs, seq, self.num_heads,
@@ -309,14 +386,14 @@ class FlashGQAAttention(nn.Module):
         k = k.transpose(1, 2).bfloat16().to("cuda")
         v = v.transpose(1, 2).bfloat16().to("cuda")
 
-        attn_output = flash_attn_func(
-            q, k, v, dropout_p=0.0, softmax_scale=None, causal=False, alibi_slopes=None, deterministic=False).to(x.dtype)
+        attn_output = self._flash_attention_forward(query_states=q, key_states=k, value_states=v, attention_mask=attention_mask, query_length=seq)
+
+        attn_output = attn_output.to(x.dtype)
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(bs, seq, -1)
         attn_output = self.o_proj(attn_output)
 
-        print("output-----")
-        print(attn_output.shape)
+        return attn_output
 
 
 class DynamicNTKFlashGQAAttention(FlashGQAAttention):
@@ -327,6 +404,11 @@ class DynamicNTKFlashGQAAttention(FlashGQAAttention):
 
     def forward(self, x, position_ids):
         return super().forward(x, position_ids)
+
+
+class YarnFLashGQAAttention(FlashGQAAttention):
+    def __init__(self, *args):
+        pass
 
 
 # FEED FORWARD NETWORK
@@ -357,10 +439,9 @@ class RMSNorm(nn.Module):
 
         return self.weight * hidden_states.to(input_dtype)
 
-
 # BERT BLOCK
 class BertBlock(nn.Module):
-    def __init__(self, layer_id: int, hidden_state, mlp_dim, num_heads, num_kv_heads, base=10000, flash=False, device="cpu"):
+    def __init__(self, layer_id: int, hidden_state, mlp_dim, num_heads, num_kv_heads, base=10000, flash=False, device="cpu", immediate=False):
         assert hidden_state % num_heads == 0, print(
             f"Hidden state is {hidden_state} not divisible by number of heads: {num_heads}")
 
@@ -368,6 +449,7 @@ class BertBlock(nn.Module):
             raise ValueError("Device must be CUDA to enable flash attention")
 
         self.flash = flash
+        self.immediate = immediate
 
         super().__init__()
         head_dim = hidden_state // num_heads
@@ -385,8 +467,19 @@ class BertBlock(nn.Module):
         self.attention_norm = RMSNorm(hidden_size=hidden_state)
         self.mlp_norm = RMSNorm(hidden_size=hidden_state)
 
-    def forward(self, x, position_ids, mask=None):
-        h = x + self.attention(self.attention_norm(x), position_ids)
+    def _forward(self, x, position_ids, mask):
+        h = x + self.attention(self.attention_norm(x), mask, position_ids)
+        out = h + self.mlp(x)
+
+        return out
+
+    def forward(self, x, position_ids, mask):
+        if self.immediate:
+            out = self._forward(x, position_ids, mask)
+            out = self._forward(out, position_ids, mask)
+            return out
+
+        h = x + self.attention(self.attention_norm(x), mask, position_ids)
 
         out = h + self.mlp(x)
 
@@ -394,8 +487,8 @@ class BertBlock(nn.Module):
 
 
 class DynamicNTKBertBlock(BertBlock):
-    def __init__(self, layer_id, hidden_state, mlp_dim, num_heads, num_kv_heads, base=10000, flash=False, device="cpu", scaling_factor=1.0):
-        super().__init__(layer_id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device)
+    def __init__(self, layer_id, hidden_state, mlp_dim, num_heads, num_kv_heads, base=10000, flash=False, device="cpu", immediate=False, scaling_factor=1.0):
+        super().__init__(layer_id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device, immediate)
 
         if self.flash:
             self.attention = DynamicNTKFlashGQAAttention(num_heads, num_kv_heads, head_dim, hidden_state, device, scaling_factor=scaling_factor)
@@ -407,8 +500,8 @@ class DynamicNTKBertBlock(BertBlock):
 
 
 class YarnBertBlock(BertBlock):
-    def __init__(self, layer_id, hidden_state, mlp_dim, num_heads, num_kv_heads, base=10000, flash=False, device="cpu", original_max_position_embeddings=128, max_position_embeddings=2048, scale=16, beta=32, alpha=1, mscale=0.707):
-        super().__init__(layer_id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device)
+    def __init__(self, layer_id, hidden_state, mlp_dim, num_heads, num_kv_heads, base=10000, flash=False, device="cpu", immediate=False, original_max_position_embeddings=128, max_position_embeddings=2048, scale=16, beta=32, alpha=1, mscale=0.707):
+        super().__init__(layer_id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device, immediate)
 
         if self.flash:
             pass
@@ -420,37 +513,71 @@ class YarnBertBlock(BertBlock):
 
 
 class CotaiBert(nn.Module):
-    def __init__(self, num_blocks, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash=False, device="cpu", original_max_position_embeddings=128, max_position_embeddings=256, scale=16, beta=32, alpha=1, mscale=0.707, scaling_factor=1.0, yarn=False, ntk=False):
+    def __init__(self, num_blocks, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash=False, device="cpu", original_max_position_embeddings=128, max_position_embeddings=256, scale=16, beta=32, alpha=1, mscale=0.707, scaling_factor=1.0, yarn=False, ntk=False, mask_id=52290, immediate=False):
         super().__init__()
 
+        vocab_size = 52293
+        self.immediate = immediate
+
+        self.register_buffer("mask_id", torch.tensor([mask_id], dtype=torch.int), persistent=True)
+        self.embed = nn.Embedding(vocab_size, hidden_state, padding_idx=52289)
+
         if yarn:
-            self.blocks = nn.ModuleList([BertBlock(id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device).to(device) for id in range(num_blocks)])
+            self.blocks = nn.ModuleList([BertBlock(id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device, immediate).to(device) for id in range(num_blocks)])
         else:
             if ntk:
-                self.blocks = nn.ModuleList([DynamicNTKBertBlock(id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device, scaling_factor=scaling_factor) for id in range(num_blocks)])
+                self.blocks = nn.ModuleList([DynamicNTKBertBlock(id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device, immediate, scaling_factor=scaling_factor).to(device) for id in range(num_blocks)])
             else:
-                self.blocks = nn.ModuleList([YarnBertBlock(id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device, original_max_position_embeddings=original_max_position_embeddings, max_position_embeddings=max_position_embeddings, beta=32, alpha=1, scale=16, mscale=0.707).to(device) for id in range(num_blocks)])
+                self.blocks = nn.ModuleList([YarnBertBlock(id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device, immediate, original_max_position_embeddings=original_max_position_embeddings, max_position_embeddings=max_position_embeddings, beta=32, alpha=1, scale=16, mscale=0.707).to(device) for id in range(num_blocks)])
 
-    def _forward(self, x, position_ids, mask=None):
+    def _forward(self, x, attention_mask, position_ids):
         for block in self.blocks:
-            x = block(x, position_ids, mask)
+            x = block(x, position_ids, attention_mask)
 
         return x
 
-    def forward(self, x, position_ids, mask=None):
-        # recursion model for double passing through the models
-        x = self._forward(x, position_ids, mask)
-        x = self._forward(x, position_ids, mask)
+    def forward(self, input_ids, attention_mask, token_type_ids, position_ids, **kwargs):
+        x = self.embed(input_ids)
 
-        return x
+        # forward pass through model
+        if self.immediate:
+            x = self._forward(x, attention_mask, position_ids)
+        else:
+            x = self._forward(x, attention_mask, position_ids)
+            x = self._forward(x, attention_mask, position_ids)
+
+        mask_id = self.mask_id[0]
+        x = x[input_ids == mask_id]
+
+        logits = F.linear(x, self.embed.weight)
+
+        return logits
+
+
+class Hfwrapper(nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+        self.loss = nn.CrossEntropyLoss(ignore_index=52289)
+
+    def forward(self, input_ids, attention_mask, position_ids, labels, **kwargs):
+        logits = self.model(input_ids, attention_mask, position_ids, **kwargs)
+        labels = labels[self.model.mask_id]
+
+        if labels is not None:
+            loss = self.loss(logits, labels)
+            return ModelOutput(loss=loss, logits=logits)
+        else:
+            return ModelOutput(logits=logits)
 
 
 if __name__ == "__main__":
-    original_max_position_embeddings = 128
+    original_max_position_embeddings = 256
     max_position_embeddings = 2048
     num_heads = 9
     num_kv_heads = 3
     hidden_state = 576
+    vocab_size = 30272
     mlp_dim = 1536
     head_dim = hidden_state // num_heads
     base = 10000
@@ -459,16 +586,28 @@ if __name__ == "__main__":
     flash = True
     num_blocks = 15
     yarn = False
-    ntk = True
+    ntk = False
     scaling_factor = 1.0
+    immediate = False
+    mask_id = 52290
 
-    model = CotaiBert(num_blocks, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash=False, device="cpu", original_max_position_embeddings=128, max_position_embeddings=256, scale=16, beta=32, alpha=1, mscale=0.707, scaling_factor=scaling_factor, yarn=yarn, ntk=ntk)
+    model = CotaiBert(num_blocks, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash=flash, device=device, original_max_position_embeddings=original_max_position_embeddings, max_position_embeddings=max_position_embeddings, scale=16, beta=32, alpha=1, mscale=0.707, scaling_factor=scaling_factor, yarn=yarn, ntk=ntk, mask_id=mask_id, immediate=immediate).to(device)
 
     # initialize input
-    x = torch.randn(batch_size, original_max_position_embeddings, hidden_state)
-    position_ids = torch.stack([torch.arange(original_max_position_embeddings) for _ in range(batch_size)])
+    x = torch.randint(0, vocab_size, (batch_size, original_max_position_embeddings)).to(device)
 
-    model_output = model(x, position_ids, mask=None).to(device)
+    # manual masking
+    x[0][0] = mask_id
+    x[1][10] = mask_id
+    x[1][20] = mask_id
+    x[2][30] = mask_id
+    x[3][60] = mask_id
+
+    mask = None
+    token_type_ids = None
+    position_ids = torch.stack([torch.arange(original_max_position_embeddings) for _ in range(batch_size)]).to(device)
+
+    model_output = model(x, mask, token_type_ids, position_ids).to(device)
 
     print("model output----")
     print(model_output.shape)
