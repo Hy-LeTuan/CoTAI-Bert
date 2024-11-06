@@ -1,5 +1,6 @@
-import torch
+from huggingface_hub import PyTorchModelHubMixin
 import torch.nn as nn
+import torch
 import math
 import torch.nn.functional as F
 from flash_attn import flash_attn_func
@@ -319,16 +320,6 @@ class FlashGQAAttention(nn.Module):
         print(attn_output.shape)
 
 
-class DynamicNTKFlashGQAAttention(FlashGQAAttention):
-    def __init__(self, *args, scaling_factor):
-        super().__init__(*args)
-
-        self.rot_embed = DynamicNTKRotatoryEmbedding(*args, scaling_factor=scaling_factor)
-
-    def forward(self, x, position_ids):
-        return super().forward(x, position_ids)
-
-
 # FEED FORWARD NETWORK
 class MLP(nn.Module):
     def __init__(self, mlp_dim, hidden_state):
@@ -392,16 +383,15 @@ class BertBlock(nn.Module):
 
         return out
 
-
 class DynamicNTKBertBlock(BertBlock):
-    def __init__(self, layer_id, hidden_state, mlp_dim, num_heads, num_kv_heads, base=10000, flash=False, device="cpu", scaling_factor=1.0):
+    def __init__(self, layer_id, hidden_state, mlp_dim, num_hads, num_kv_heads, base=10000, flash=False, device="cpu", scaling_factor=1.0):
         super().__init__(layer_id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device)
 
         if self.flash:
-            self.attention = DynamicNTKFlashGQAAttention(num_heads, num_kv_heads, head_dim, hidden_state, device, scaling_factor=scaling_factor)
+            pass
         else:
             self.attention = YarnGQAAttention(num_heads, num_kv_heads, head_dim, hidden_state, base, device, scaling_factor=scaling_factor)
-
+        
         def forward(self, x, position_ids, mask=None):
             return super().forward(x, position_ids, mask)
 
@@ -420,16 +410,15 @@ class YarnBertBlock(BertBlock):
 
 
 class CotaiBert(nn.Module):
-    def __init__(self, num_blocks, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash=False, device="cpu", original_max_position_embeddings=128, max_position_embeddings=256, scale=16, beta=32, alpha=1, mscale=0.707, scaling_factor=1.0, yarn=False, ntk=False):
+    def __init__(self, num_blocks, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash=False, device="cpu", original_max_position_embeddings=128, max_position_embeddings=256, scale=16, beta=32, alpha=1, mscale=0.707, yarn=False, ntk=False):
         super().__init__()
 
         if yarn:
             self.blocks = nn.ModuleList([BertBlock(id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device).to(device) for id in range(num_blocks)])
         else:
             if ntk:
-                self.blocks = nn.ModuleList([DynamicNTKBertBlock(id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device, scaling_factor=scaling_factor) for id in range(num_blocks)])
-            else:
-                self.blocks = nn.ModuleList([YarnBertBlock(id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device, original_max_position_embeddings=original_max_position_embeddings, max_position_embeddings=max_position_embeddings, beta=32, alpha=1, scale=16, mscale=0.707).to(device) for id in range(num_blocks)])
+                self.blocks = nn.ModuleList([])
+            self.blocks = nn.ModuleList([YarnBertBlock(id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device, original_max_position_embeddings=original_max_position_embeddings, max_position_embeddings=max_position_embeddings, beta=32, alpha=1, scale=16, mscale=0.707).to(device) for id in range(num_blocks)])
 
     def _forward(self, x, position_ids, mask=None):
         for block in self.blocks:
@@ -456,13 +445,11 @@ if __name__ == "__main__":
     base = 10000
     batch_size = 4
     device = "cuda"
-    flash = True
+    flash = False
     num_blocks = 15
     yarn = False
-    ntk = True
-    scaling_factor = 1.0
 
-    model = CotaiBert(num_blocks, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash=False, device="cpu", original_max_position_embeddings=128, max_position_embeddings=256, scale=16, beta=32, alpha=1, mscale=0.707, scaling_factor=scaling_factor, yarn=yarn, ntk=ntk)
+    model = CotaiBert(num_blocks, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash=False, device="cpu", original_max_position_embeddings=128, max_position_embeddings=256, scale=16, beta=32, alpha=1, mscale=0.707, yarn=yarn)
 
     # initialize input
     x = torch.randn(batch_size, original_max_position_embeddings, hidden_state)
