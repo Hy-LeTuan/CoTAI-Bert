@@ -143,7 +143,7 @@ class DynamicNTKRotatoryEmbedding(RotatoryEmbedding):
         seq_len = torch.max(position_ids) + 1
 
         if seq_len > self.max_position_embeddings:
-            base = self.base * ( (self.scaling_factor * seq_len / self.max_position_embeddings) - (self.scaling_factor - 1)) ** (self.hidden_state / (self.hidden_state - 2))
+            base = self.base * ((self.scaling_factor * seq_len / self.max_position_embeddings) - (self.scaling_factor - 1)) ** (self.hidden_state / (self.hidden_state - 2))
 
             inv_freq = 1.0 / (base ** (torch.arange(0, self.hidden_state, 2, dtype=torch.int64).float().to(x.device) / self.dim))
             self.register_buffer("inv_freq", inv_freq, persistent=False)
@@ -439,6 +439,7 @@ class RMSNorm(nn.Module):
 
         return self.weight * hidden_states.to(input_dtype)
 
+
 # BERT BLOCK
 class BertBlock(nn.Module):
     def __init__(self, layer_id: int, hidden_state, mlp_dim, num_heads, num_kv_heads, base=10000, flash=False, device="cpu", immediate=False):
@@ -469,7 +470,7 @@ class BertBlock(nn.Module):
 
     def _forward(self, x, position_ids, mask):
         h = x + self.attention(self.attention_norm(x), mask, position_ids)
-        out = h + self.mlp(x)
+        out = self.mlp_norm(h) + self.mlp(x)
 
         return out
 
@@ -481,7 +482,7 @@ class BertBlock(nn.Module):
 
         h = x + self.attention(self.attention_norm(x), mask, position_ids)
 
-        out = h + self.mlp(x)
+        out = self.mlp_norm(h) + self.mlp(x)
 
         return out
 
@@ -522,12 +523,12 @@ class CotaiBert(nn.Module):
         self.register_buffer("mask_id", torch.tensor([mask_id], dtype=torch.int), persistent=True)
         self.embed = nn.Embedding(vocab_size, hidden_state, padding_idx=52289)
 
-        if yarn:
+        if not yarn and not ntk:
             self.blocks = nn.ModuleList([BertBlock(id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device, immediate).to(device) for id in range(num_blocks)])
         else:
             if ntk:
                 self.blocks = nn.ModuleList([DynamicNTKBertBlock(id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device, immediate, scaling_factor=scaling_factor).to(device) for id in range(num_blocks)])
-            else:
+            elif yarn:
                 self.blocks = nn.ModuleList([YarnBertBlock(id, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash, device, immediate, original_max_position_embeddings=original_max_position_embeddings, max_position_embeddings=max_position_embeddings, beta=32, alpha=1, scale=16, mscale=0.707).to(device) for id in range(num_blocks)])
 
     def _forward(self, x, attention_mask, position_ids):
@@ -560,15 +561,18 @@ class Hfwrapper(nn.Module):
         self.model = model
         self.loss = nn.CrossEntropyLoss(ignore_index=52289)
 
-    def forward(self, input_ids, attention_mask, position_ids, labels, **kwargs):
-        logits = self.model(input_ids, attention_mask, position_ids, **kwargs)
-        labels = labels[self.model.mask_id]
+    def forward(self, input_ids, attention_mask, labels, **kwargs):
+        bs, seq_len = input_ids.shape
+        position_ids = torch.stack([torch.arange(seq_len) for _ in range(bs)]).to(input_ids.device)
+        logits = self.model(input_ids, attention_mask, None, position_ids, **kwargs)
+        mask_map = input_ids == self.model.mask_id
+        labels = labels[mask_map]
 
         if labels is not None:
             loss = self.loss(logits, labels)
-            return ModelOutput(loss=loss, logits=logits)
+            return ModelOutput(loss=loss, logits=logits, mask_map=mask_map, labels=labels)
         else:
-            return ModelOutput(logits=logits)
+            return ModelOutput(logits=logits, mask_map=mask_map, labels=labels)
 
 
 if __name__ == "__main__":
@@ -592,9 +596,11 @@ if __name__ == "__main__":
     mask_id = 52290
 
     model = CotaiBert(num_blocks, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash=flash, device=device, original_max_position_embeddings=original_max_position_embeddings, max_position_embeddings=max_position_embeddings, scale=16, beta=32, alpha=1, mscale=0.707, scaling_factor=scaling_factor, yarn=yarn, ntk=ntk, mask_id=mask_id, immediate=immediate).to(device)
+    wrapper = Hfwrapper(model=model).to(device)
 
     # initialize input
     x = torch.randint(0, vocab_size, (batch_size, original_max_position_embeddings)).to(device)
+    labels = torch.randint(0, vocab_size, (batch_size, original_max_position_embeddings)).to(device)
 
     # manual masking
     x[0][0] = mask_id
@@ -607,7 +613,7 @@ if __name__ == "__main__":
     token_type_ids = None
     position_ids = torch.stack([torch.arange(original_max_position_embeddings) for _ in range(batch_size)]).to(device)
 
-    model_output = model(x, mask, token_type_ids, position_ids).to(device)
+    model_output = wrapper(x, mask, labels)
 
     print("model output----")
-    print(model_output.shape)
+    print(model_output)
