@@ -22,7 +22,8 @@ def compute_metrics(tokenizer):
         labels = labels[mask_map]
         predictions = np.argmax(logits, axis=-1)
 
-        precision, recall, f1, _ = precision_recall_fscore_support(temp_labels, predictions, average="weighted")
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            temp_labels, predictions, average="weighted")
 
         return {
             "precision": precision,
@@ -50,13 +51,38 @@ if __name__ == "__main__":
     scaling_factor = 1.0
     immediate = False
     mask_id = 52290
+    alpha = 1
+    beta = 32
+    scale = 16
+    mscale = 0.707
 
-    model = CotaiBert(num_blocks, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash=flash, device=device, original_max_position_embeddings=original_max_position_embeddings, max_position_embeddings=max_position_embeddings, scale=16, beta=32, alpha=1, mscale=0.707, scaling_factor=scaling_factor, yarn=yarn, ntk=ntk, mask_id=mask_id, immediate=immediate).to(device)
+    model = CotaiBert(num_blocks,
+                      hidden_state,
+                      mlp_dim,
+                      num_heads,
+                      num_kv_heads,
+                      base,
+                      flash=flash,
+                      device=device,
+                      original_max_position_embeddings=original_max_position_embeddings,
+                      max_position_embeddings=max_position_embeddings,
+                      scale=scale,
+                      beta=beta,
+                      alpha=alpha,
+                      mscale=mscale,
+                      scaling_factor=scaling_factor,
+                      yarn=yarn,
+                      ntk=ntk,
+                      mask_id=mask_id,
+                      immediate=immediate).to(device),
+
     wrapper = Hfwrapper(model)
 
     optimizer = torch.optim.AdamW(lr=5e-4, params=wrapper.model.parameters())
-    tokenizer = AutoTokenizer.from_pretrained("/home/hyle/Documents/vscode/NLPDataCollection/NLPDataCollection/tokenizer/trained_tokenizer/tokenizer-50k")
-    collator = DataCollatorForLanguageModeling(tokenizer, mlm=True, mlm_probability=0.3, return_tensors="pt")
+    tokenizer = AutoTokenizer.from_pretrained(
+        "/home/hyle/Documents/vscode/NLPDataCollection/NLPDataCollection/tokenizer/trained_tokenizer/tokenizer-50k")
+    collator = DataCollatorForLanguageModeling(
+        tokenizer, mlm=True, mlm_probability=0.3, return_tensors="pt")
     training_arguments = TrainingArguments(
         output_dir="./results",
         do_train=True,
@@ -82,9 +108,11 @@ if __name__ == "__main__":
         # torch_compile_backend="inductor",
     )
 
-    train_dataset = load_from_disk("/home/hyle/Documents/vscode/NLPLearn/visobert-token-classification/data/tokenized_dataset_train")
-    val_dataset = load_from_disk("/home/hyle/Documents/vscode/NLPLearn/visobert-token-classification/data/tokenized_dataset_val")
+    train_dataset = load_from_disk(
+        "/home/hyle/Documents/vscode/NLPLearn/visobert-token-classification/data/tokenized_dataset_train")
+    val_dataset = load_from_disk(
+        "/home/hyle/Documents/vscode/NLPLearn/visobert-token-classification/data/tokenized_dataset_val")
 
-
-    trainer = Trainer(args=training_arguments, model=wrapper, data_collator=collator, train_dataset=train_dataset, eval_dataset=val_dataset, optimizers=(optimizer, None), compute_metrics=compute_metrics(tokenizer))
+    trainer = Trainer(args=training_arguments, model=wrapper, data_collator=collator, train_dataset=train_dataset,
+                      eval_dataset=val_dataset, optimizers=(optimizer, None), compute_metrics=compute_metrics(tokenizer))
     trainer.train()

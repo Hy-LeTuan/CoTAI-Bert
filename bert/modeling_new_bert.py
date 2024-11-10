@@ -259,8 +259,8 @@ class DynamicNTKGQAAttention(GQAAttention):
         super().__init__(*args)
         self.rot_embed = DynamicNTKRotatoryEmbedding(*args, scaling_factor=1.0)
 
-    def forward(self, x, position_ids):
-        return super().forward(x, position_ids)
+    def forward(self, x, mask, position_ids):
+        return super().forward(x, mask, position_ids)
 
 
 class YarnGQAAttention(GQAAttention):
@@ -269,8 +269,8 @@ class YarnGQAAttention(GQAAttention):
         self.rot_embed = YarnRotatoryEmbedding(
             self.head_dim, self.base, max_position_embeddings, self.device, original_max_position_embeddings=original_max_position_embeddings, scale=scale, beta=beta, alpha=alpha, mscale=mscale)
 
-        def forward(self, x, position_ids):
-            return super().forward(x, position_ids)
+        def forward(self, x, mask, position_ids):
+            return super().forward(x, mask, position_ids)
 
 
 class FlashGQAAttention(nn.Module):
@@ -402,8 +402,8 @@ class DynamicNTKFlashGQAAttention(FlashGQAAttention):
 
         self.rot_embed = DynamicNTKRotatoryEmbedding(*args, scaling_factor=scaling_factor)
 
-    def forward(self, x, position_ids):
-        return super().forward(x, position_ids)
+    def forward(self, x, attention_mask, position_ids):
+        return super().forward(x, attention_mask, position_ids)
 
 
 class YarnFLashGQAAttention(FlashGQAAttention):
@@ -481,7 +481,6 @@ class BertBlock(nn.Module):
             return out
 
         h = x + self.attention(self.attention_norm(x), mask, position_ids)
-
         out = self.mlp_norm(h) + self.mlp(x)
 
         return out
@@ -494,7 +493,7 @@ class DynamicNTKBertBlock(BertBlock):
         if self.flash:
             self.attention = DynamicNTKFlashGQAAttention(num_heads, num_kv_heads, head_dim, hidden_state, device, scaling_factor=scaling_factor)
         else:
-            self.attention = YarnGQAAttention(num_heads, num_kv_heads, head_dim, hidden_state, base, device, scaling_factor=scaling_factor)
+            self.attention = DynamicNTKGQAAttention(num_heads, num_kv_heads, head_dim, hidden_state, base, device, scaling_factor=scaling_factor)
 
         def forward(self, x, position_ids, mask=None):
             return super().forward(x, position_ids, mask)
@@ -581,7 +580,7 @@ if __name__ == "__main__":
     num_heads = 9
     num_kv_heads = 3
     hidden_state = 576
-    vocab_size = 30272
+    vocab_size = 52293 - 5 # calculate the number of non-speical tokens in tokenizer
     mlp_dim = 1536
     head_dim = hidden_state // num_heads
     base = 10000
@@ -594,8 +593,31 @@ if __name__ == "__main__":
     scaling_factor = 1.0
     immediate = False
     mask_id = 52290
+    alpha = 1
+    beta = 32
+    scale = 16
+    mscale = 0.707
 
-    model = CotaiBert(num_blocks, hidden_state, mlp_dim, num_heads, num_kv_heads, base, flash=flash, device=device, original_max_position_embeddings=original_max_position_embeddings, max_position_embeddings=max_position_embeddings, scale=16, beta=32, alpha=1, mscale=0.707, scaling_factor=scaling_factor, yarn=yarn, ntk=ntk, mask_id=mask_id, immediate=immediate).to(device)
+    model = CotaiBert(num_blocks,
+                      hidden_state,
+                      mlp_dim,
+                      num_heads,
+                      num_kv_heads,
+                      base,
+                      flash=flash,
+                      device=device,
+                      original_max_position_embeddings=original_max_position_embeddings,
+                      max_position_embeddings=max_position_embeddings,
+                      scale=scale,
+                      beta=beta,
+                      alpha=alpha,
+                      mscale=mscale,
+                      scaling_factor=scaling_factor,
+                      yarn=yarn,
+                      ntk=ntk,
+                      mask_id=mask_id,
+                      immediate=immediate).to(device)
+
     wrapper = Hfwrapper(model=model).to(device)
 
     # initialize input
