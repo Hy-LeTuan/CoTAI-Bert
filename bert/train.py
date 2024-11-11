@@ -16,10 +16,8 @@ def compute_metrics(tokenizer):
         # get logits and mask map from model
         logits = model_output[0]
         mask_map = model_output[1]
-
         temp_labels = model_output[2]
 
-        labels = labels[mask_map]
         predictions = np.argmax(logits, axis=-1)
 
         precision, recall, f1, _ = precision_recall_fscore_support(
@@ -74,7 +72,7 @@ if __name__ == "__main__":
                       yarn=yarn,
                       ntk=ntk,
                       mask_id=mask_id,
-                      immediate=immediate).to(device),
+                      immediate=immediate).to(device)
 
     wrapper = Hfwrapper(model)
 
@@ -88,7 +86,7 @@ if __name__ == "__main__":
         do_train=True,
         do_eval=True,
         eval_strategy="steps",
-        eval_steps=2500,
+        eval_steps=200,
         logging_strategy="steps",
         logging_steps=600,
         torch_compile=False,
@@ -97,10 +95,10 @@ if __name__ == "__main__":
         bf16=False,
         per_device_train_batch_size=1,
         per_device_eval_batch_size=1,
-        eval_accumulation_steps=50,
+        eval_accumulation_steps=64,
         max_steps=10000,
         save_strategy="steps",
-        save_steps=5000,
+        save_steps=1000,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,

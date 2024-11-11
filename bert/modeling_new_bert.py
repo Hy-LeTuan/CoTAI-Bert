@@ -216,7 +216,7 @@ class GQAAttention(nn.Module):
 
         return kv.reshape(batch, num_key_value_heads * self.num_groups, slen, head_dim)
 
-    def forward(self, x, mask, position_ids):
+    def forward(self, x, attention_mask, position_ids):
         bs, seq, _ = x.size()
 
         q = self.q_proj(x).view(bs, seq, self.num_heads,
@@ -239,10 +239,12 @@ class GQAAttention(nn.Module):
         attn_weights = torch.matmul(
             q, k.transpose(-1, -2)) / math.sqrt(self.head_dim)
 
+        if attention_mask is not None:
+            attention_mask = attention_mask[:, None, None, :]
+            attn_weights = attn_weights + attention_mask
+
         # calculate attention score and upcast to float32
-        attn_weights = nn.functional.softmax(
-            attn_weights, dim=-1, dtype=torch.float32).to(q.dtype)
-        # attn_weights = nn.functional.dropout( attn_weights, p=self.attention_dropout, training=self.training)
+        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(q.dtype)
 
         # calculate final attention output
         attn_output = torch.matmul(attn_weights, v)
@@ -565,9 +567,9 @@ class Hfwrapper(nn.Module):
         position_ids = torch.stack([torch.arange(seq_len) for _ in range(bs)]).to(input_ids.device)
         logits = self.model(input_ids, attention_mask, None, position_ids, **kwargs)
         mask_map = input_ids == self.model.mask_id
-        labels = labels[mask_map]
 
         if labels is not None:
+            labels = labels[mask_map]
             loss = self.loss(logits, labels)
             return ModelOutput(loss=loss, logits=logits, mask_map=mask_map, labels=labels)
         else:
