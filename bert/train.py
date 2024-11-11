@@ -21,7 +21,11 @@ def compute_metrics(tokenizer):
         predictions = np.argmax(logits, axis=-1)
 
         precision, recall, f1, _ = precision_recall_fscore_support(
-            temp_labels, predictions, average="weighted")
+            temp_labels,
+            predictions,
+            average="weighted",
+            zero_division=0.0
+        )
 
         return {
             "precision": precision,
@@ -38,12 +42,12 @@ if __name__ == "__main__":
     num_heads = 9
     num_kv_heads = 3
     hidden_state = 576
-    mlp_dim = 200  # 1536
+    mlp_dim = 564  # 1536
     head_dim = hidden_state // num_heads
     base = 10000
     device = "cuda"
-    flash = False
-    num_blocks = 4  # 15
+    flash = True
+    num_blocks =  8 # 15
     yarn = False
     ntk = False
     scaling_factor = 1.0
@@ -76,7 +80,7 @@ if __name__ == "__main__":
 
     wrapper = Hfwrapper(model)
 
-    optimizer = torch.optim.AdamW(lr=5e-4, params=wrapper.model.parameters())
+    optimizer = torch.optim.AdamW(lr=2e-5, params=wrapper.model.parameters())
     tokenizer = AutoTokenizer.from_pretrained(
         "/home/hyle/Documents/vscode/NLPDataCollection/NLPDataCollection/tokenizer/trained_tokenizer/tokenizer-50k")
     collator = DataCollatorForLanguageModeling(
@@ -86,15 +90,15 @@ if __name__ == "__main__":
         do_train=True,
         do_eval=True,
         eval_strategy="steps",
-        eval_steps=200,
+        eval_steps=500,
         logging_strategy="steps",
-        logging_steps=600,
+        logging_steps=0.2,
         torch_compile=False,
         dataloader_pin_memory=True,
         dataloader_num_workers=4,
-        bf16=False,
-        per_device_train_batch_size=1,
-        per_device_eval_batch_size=1,
+        bf16=True,
+        per_device_train_batch_size=4,
+        per_device_eval_batch_size=4,
         eval_accumulation_steps=64,
         max_steps=10000,
         save_strategy="steps",
