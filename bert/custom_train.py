@@ -147,6 +147,7 @@ def train(model, train_dataset, test_dataset, optimizer, scheduler, pad_id=52289
             else:
                 p_bar.set_description(f"best loss: {best_loss} | lr: {scheduler.get_last_lr()}")
 
+
 if __name__ == "__main__":
     original_max_position_embeddings = 256
     max_position_embeddings = 2048
