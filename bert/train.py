@@ -42,12 +42,12 @@ if __name__ == "__main__":
     num_heads = 9
     num_kv_heads = 3
     hidden_state = 576
-    mlp_dim = 564  # 1536
+    mlp_dim = 1536  # 1536
     head_dim = hidden_state // num_heads
     base = 10000
     device = "cuda"
     flash = True
-    num_blocks =  8 # 15
+    num_blocks = 15  # 15
     yarn = False
     ntk = False
     scaling_factor = 1.0
@@ -93,21 +93,21 @@ if __name__ == "__main__":
         eval_steps=500,
         logging_strategy="steps",
         logging_steps=0.2,
-        torch_compile=False,
+        torch_compile=True,
         dataloader_pin_memory=True,
-        dataloader_num_workers=4,
+        dataloader_num_workers=14,
         bf16=True,
-        per_device_train_batch_size=4,
-        per_device_eval_batch_size=4,
-        eval_accumulation_steps=64,
-        max_steps=10000,
+        per_device_train_batch_size=12,
+        per_device_eval_batch_size=12,
+        eval_accumulation_steps=12,
+        max_steps=20000,
         save_strategy="steps",
         save_steps=1000,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
         save_total_limit=1,
-        # torch_compile_backend="inductor",
+        torch_compile_backend="inductor",
     )
 
     train_dataset = load_from_disk(
