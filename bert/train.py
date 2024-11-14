@@ -9,19 +9,18 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 
-def compute_metrics(tokenizer):
+def compute_metrics():
     def compute(eval_preds):
         model_output, labels = eval_preds
 
         # get logits and mask map from model
         logits = model_output[0]
-        mask_map = model_output[1]
-        temp_labels = model_output[2]
+        labels_from_model = model_output[2]
 
         predictions = np.argmax(logits, axis=-1)
 
         precision, recall, f1, _ = precision_recall_fscore_support(
-            temp_labels,
+            labels_from_model,
             predictions,
             average="weighted",
             zero_division=0.0
@@ -42,14 +41,14 @@ if __name__ == "__main__":
     num_heads = 9
     num_kv_heads = 3
     hidden_state = 576
-    mlp_dim = 1536  # 1536
+    mlp_dim = 1536
     head_dim = hidden_state // num_heads
     base = 10000
     device = "cuda"
     flash = True
-    num_blocks = 15  # 15
+    num_blocks = 15
     yarn = False
-    ntk = False
+    ntk = True
     scaling_factor = 1.0
     immediate = False
     mask_id = 52290
@@ -82,11 +81,16 @@ if __name__ == "__main__":
 
     optimizer = torch.optim.AdamW(lr=2e-5, params=wrapper.model.parameters())
     tokenizer = AutoTokenizer.from_pretrained(
-        "/home/hyle/Documents/vscode/NLPDataCollection/NLPDataCollection/tokenizer/trained_tokenizer/tokenizer-50k")
+        "../tokenizer/trained_tokenizer/tokenizer-50k"
+    )
     collator = DataCollatorForLanguageModeling(
-        tokenizer, mlm=True, mlm_probability=0.3, return_tensors="pt")
+        tokenizer,
+        mlm=True,
+        mlm_probability=0.3,
+        return_tensors="pt"
+    )
     training_arguments = TrainingArguments(
-        output_dir="./results",
+        output_dir="./results" if not ntk else "./results_ntk",
         do_train=True,
         do_eval=True,
         eval_strategy="steps",
@@ -97,9 +101,9 @@ if __name__ == "__main__":
         dataloader_pin_memory=True,
         dataloader_num_workers=14,
         bf16=True,
-        per_device_train_batch_size=12,
-        per_device_eval_batch_size=12,
-        eval_accumulation_steps=12,
+        per_device_train_batch_size=14,
+        per_device_eval_batch_size=14,
+        eval_accumulation_steps=14,
         max_steps=20000,
         save_strategy="steps",
         save_steps=1000,
@@ -111,10 +115,19 @@ if __name__ == "__main__":
     )
 
     train_dataset = load_from_disk(
-        "/home/hyle/Documents/vscode/NLPLearn/visobert-token-classification/data/tokenized_dataset_train")
+        "../../../NLPLearn/visobert-token-classification/data/tokenized_dataset_train"
+    )
     val_dataset = load_from_disk(
-        "/home/hyle/Documents/vscode/NLPLearn/visobert-token-classification/data/tokenized_dataset_val")
+        "../../../NLPLearn/visobert-token-classification/data/tokenized_dataset_val"
+    )
 
-    trainer = Trainer(args=training_arguments, model=wrapper, data_collator=collator, train_dataset=train_dataset,
-                      eval_dataset=val_dataset, optimizers=(optimizer, None), compute_metrics=compute_metrics(tokenizer))
+    trainer = Trainer(
+        args=training_arguments,
+        model=wrapper,
+        data_collator=collator,
+        train_dataset=train_dataset,
+        eval_dataset=val_dataset,
+        optimizers=(optimizer, None),
+        compute_metrics=compute_metrics(tokenizer)
+    )
     trainer.train()
