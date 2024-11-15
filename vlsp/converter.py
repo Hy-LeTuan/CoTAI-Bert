@@ -1,6 +1,3 @@
-from datasets import load_dataset
-import pandas as pd
-import numpy as np
 import torch
 from glob import glob
 import os
@@ -14,10 +11,12 @@ def extract_and_reformat(text_file_paths, destination):
         with open(filepath, "r", encoding="utf-8") as f:
             content = f.readline()
             output_file = open(
-                f"./data/formatted_data/2016/{destination}/{str(file_counter).zfill(5)}.txt", "w", encoding="utf-8")
+                f"./data/formatted_data/2016/{destination}/{str(file_counter).zfill(5)}.csv", "w", encoding="utf-8")
+
+            # write header
+            output_file.write(f"Word,Tag")
 
             line_counter = 0
-
             while content:
                 if line_counter <= 3:
                     line_counter += 1
@@ -35,7 +34,7 @@ def extract_and_reformat(text_file_paths, destination):
                 if tags and len(tags) >= 4:
                     words = tags[0]
                     ner_tag = tags[3]
-                    output_file.write(f"{words} {ner_tag}\n")
+                    output_file.write(f"{words},{ner_tag}\n")
 
                 content = f.readline()
 
@@ -46,10 +45,10 @@ def extract_and_reformat(text_file_paths, destination):
 if __name__ == "__main__":
     # get all .txt file paths in NER 2016 dataset
 
-    destination = ["./data/NER2016-TrainingData-3-3-2017-txt/**/*.txt",
-                   "./data/NER2016-TestData-16-9-2016/**/*.txt"]
+    origin = ["./data/NER2016-TrainingData-3-3-2017-txt/**/*.txt",
+              "./data/NER2016-TestData-16-9-2016/**/*.txt"]
     destination = ["train", "test"]
 
-    for o, d in zip(destination, destination):
+    for o, d in zip(origin, destination):
         text_file_paths = sorted(glob(o, recursive=True))
         extract_and_reformat(text_file_paths, destination=d)
