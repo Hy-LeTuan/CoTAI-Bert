@@ -14,7 +14,7 @@ def extract_and_reformat(text_file_paths, destination):
                 f"./data/formatted_data/2016/{destination}/{str(file_counter).zfill(5)}.csv", "w", encoding="utf-8")
 
             # write header
-            output_file.write(f"Word,Tag")
+            output_file.write(f"Word,Tag\n")
 
             line_counter = 0
             while content:
