@@ -202,7 +202,8 @@ class YarnRotatoryEmbedding(RotatoryEmbedding):
             scale,
             beta,
             alpha,
-            mscale
+            mscale,
+            finetune=False
     ):
         super().__init__(
             hidden_state=hidden_state,
@@ -215,21 +216,24 @@ class YarnRotatoryEmbedding(RotatoryEmbedding):
         self.beta = beta
         self.alpha = alpha
         self.mscale = mscale
+        self.finetune = finetune
 
     def forward(self, x, position_ids):
-        bs, _, _, _ = x.shape
+        bs, _, seq_len, _ = x.shape
+
         cos, sin = get_yarn_positional_embed(
             dim=self.hidden_state,
-            original_max_position_embeddings=self.original_max_position_embeddings,
+            original_max_position_embeddings=seq_len,
             base=self.base,
             scale=self.scale,
             beta=self.beta,
             alpha=self.alpha,
             mscale=self.mscale,
-            max_position_embeddings=self.max_position_embeddings
+            max_position_embeddings=self.max_position_embeddings,
+            finetune=self.finetune
         )
-        cos = cos[None, :, :].expand(bs, -1, -1)
-        sin = sin[None, :, :].expand(bs, -1, -1)
+        cos = cos[None, :, :].expand(bs, -1, -1).to(x.device)
+        sin = sin[None, :, :].expand(bs, -1, -1).to(x.device)
         return cos, sin
 
 
@@ -338,6 +342,7 @@ class DynamicNTKGQAAttention(GQAAttention):
             head_dim,
             hidden_state,
             base=10000,
+            max_position_embeddings=2048,
             device="cpu",
             scaling_factor=1.0
     ):
@@ -390,7 +395,16 @@ class YarnGQAAttention(GQAAttention):
 
 
 class FlashGQAAttention(nn.Module):
-    def __init__(self, num_heads, num_kv_heads, head_dim, hidden_state, base=10000, max_position_embeddings=2048, device="cuda"):
+    def __init__(
+        self,
+        num_heads,
+        num_kv_heads,
+        head_dim,
+        hidden_state,
+        base=10000,
+        max_position_embeddings=2048,
+        device="cuda"
+    ):
         """
         Flash attention version of the ordinary GQA attention. This module is only usable on a device with CUDA enabled
         """
@@ -543,7 +557,17 @@ class FlashGQAAttention(nn.Module):
 
 
 class DynamicNTKFlashGQAAttention(FlashGQAAttention):
-    def __init__(self, num_heads, num_kv_heads, head_dim, hidden_state, base, device, scaling_factor):
+    def __init__(
+            self,
+            num_heads,
+            num_kv_heads,
+            head_dim,
+            hidden_state,
+            base,
+            max_position_embeddings,
+            device,
+            scaling_factor
+    ):
         super().__init__(
             num_heads=num_heads,
             num_kv_heads=num_kv_heads,
@@ -556,7 +580,7 @@ class DynamicNTKFlashGQAAttention(FlashGQAAttention):
         self.rot_embed = DynamicNTKRotatoryEmbedding(
             hidden_state=head_dim,
             base=base,
-            max_position_embeddings=2048,
+            max_position_embeddings=max_position_embeddings,
             device=device,
             scaling_factor=scaling_factor
         )
@@ -565,12 +589,52 @@ class DynamicNTKFlashGQAAttention(FlashGQAAttention):
         return super().forward(x, attention_mask, position_ids)
 
 
-class YarnFLashGQAAttention(FlashGQAAttention):
-    def __init__(self, *args):
-        pass
+class YarnFlashGQAAttention(FlashGQAAttention):
+    def __init__(
+            self,
+            num_heads,
+            num_kv_heads,
+            head_dim,
+            hidden_state,
+            base,
+            max_position_embeddings,
+            device,
+            original_max_position_embeddings,
+            scale,
+            beta,
+            alpha,
+            mscale,
+            finetune=False,
+    ):
+        super().__init__(
+            num_heads=num_heads,
+            num_kv_heads=num_kv_heads,
+            head_dim=head_dim,
+            hidden_state=hidden_state,
+            base=base,
+            max_position_embeddings=max_position_embeddings,
+            device=device
+        )
 
+        self.rot_embed = YarnRotatoryEmbedding(
+            hidden_state=head_dim,
+            base=base,
+            max_position_embeddings=max_position_embeddings,
+            device=device,
+            original_max_position_embeddings=original_max_position_embeddings,
+            scale=scale,
+            beta=beta,
+            alpha=alpha,
+            mscale=mscale,
+            finetune=finetune
+        )
+
+    def forward(self, x, attention_mask, position_ids):
+        return super().forward(x, attention_mask, position_ids)
 
 # FEED FORWARD NETWORK
+
+
 class MLP(nn.Module):
     def __init__(self, mlp_dim, hidden_state):
         super().__init__()
@@ -698,24 +762,25 @@ class DynamicNTKBertBlock(BertBlock):
         )
 
         if self.flash:
-            print("inside dynamic ntk flash attention")
             self.attention = DynamicNTKFlashGQAAttention(
                 num_heads=num_heads,
                 num_kv_heads=num_kv_heads,
                 head_dim=self.head_dim,
                 hidden_state=hidden_state,
                 base=base,
+                max_position_embeddings=max_position_embeddings,
                 device=device,
                 scaling_factor=scaling_factor
             )
         else:
             self.attention = DynamicNTKGQAAttention(
-                num_heads,
-                num_kv_heads,
-                self.head_dim,
-                hidden_state,
-                base,
-                device,
+                num_heads=num_heads,
+                num_kv_heads=num_kv_heads,
+                head_dim=self.head_dim,
+                hidden_state=hidden_state,
+                base=base,
+                max_position_embeddings=max_position_embeddings,
+                device=device,
                 scaling_factor=scaling_factor
             )
 
@@ -724,15 +789,67 @@ class DynamicNTKBertBlock(BertBlock):
 
 
 class YarnBertBlock(BertBlock):
-    def __init__(self, layer_id, hidden_state, mlp_dim, num_heads, num_kv_heads, base=10000, flash=False, device="cpu", immediate=False, original_max_position_embeddings=128, max_position_embeddings=2048, scale=16, beta=32, alpha=1, mscale=0.707):
-        super().__init__(layer_id, hidden_state, mlp_dim, num_heads,
-                         num_kv_heads, base, flash, device, immediate)
+    def __init__(
+        self,
+        layer_id,
+        hidden_state,
+        mlp_dim,
+        num_heads,
+        num_kv_heads,
+        base=10000,
+        flash=False,
+        device="cpu",
+        immediate=False,
+        original_max_position_embeddings=128,
+        max_position_embeddings=2048,
+        scale=16,
+        beta=32,
+        alpha=1,
+        mscale=0.707
+    ):
+        super().__init__(
+            layer_id=layer_id,
+            hidden_state=hidden_state,
+            mlp_dim=mlp_dim,
+            num_heads=num_heads,
+            num_kv_heads=num_kv_heads,
+            base=base,
+            max_position_embeddings=max_position_embeddings,
+            flash=flash,
+            device=device,
+            immediate=immediate
+        )
 
         if self.flash:
-            pass
+            self.attention = YarnFlashGQAAttention(
+                num_heads=num_heads,
+                num_kv_heads=num_kv_heads,
+                head_dim=self.head_dim,
+                hidden_state=hidden_state,
+                base=base,
+                max_position_embeddings=max_position_embeddings,
+                device=device,
+                original_max_position_embeddings=original_max_position_embeddings,
+                scale=scale,
+                beta=beta,
+                alpha=alpha,
+                mscale=mscale
+            )
         else:
-            self.attention = YarnGQAAttention(num_heads, num_kv_heads, self.head_dim, hidden_state, base, device, original_max_position_embeddings=original_max_position_embeddings,
-                                              max_position_embeddings=max_position_embeddings, beta=beta, alpha=alpha, scale=scale, mscale=mscale)
+            self.attention = YarnGQAAttention(
+                num_heads,
+                num_kv_heads,
+                self.head_dim,
+                hidden_state,
+                base,
+                device,
+                original_max_position_embeddings=original_max_position_embeddings,
+                max_position_embeddings=max_position_embeddings,
+                beta=beta,
+                alpha=alpha,
+                scale=scale,
+                mscale=mscale
+            )
 
     def forward(self, x, position_ids, mask=None):
         return super().forward(x, position_ids, mask)

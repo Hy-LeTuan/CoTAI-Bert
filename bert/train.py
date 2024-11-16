@@ -1,5 +1,5 @@
 from modeling_new_bert import CotaiBert, Hfwrapper
-from transformers import DataCollatorForLanguageModeling, Trainer, AutoTokenizer, TrainingArguments
+from transformers import DataCollatorForLanguageModeling, Trainer, AutoTokenizer, TrainingArguments, EarlyStoppingCallback
 from datasets import load_from_disk
 import torch
 import numpy as np
@@ -48,7 +48,7 @@ if __name__ == "__main__":
     flash = True
     num_blocks = 15
     yarn = False
-    ntk = True
+    ntk = False
     scaling_factor = 1.0
     immediate = False
     mask_id = 52290
@@ -83,12 +83,26 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(
         "../tokenizer/trained_tokenizer/tokenizer-50k"
     )
+
+    train_dataset = load_from_disk(
+        "../../../NLPLearn/visobert-token-classification/data/tokenized_dataset_train"
+    )
+    val_dataset = load_from_disk(
+        "../../../NLPLearn/visobert-token-classification/data/tokenized_dataset_val"
+    )
+
     collator = DataCollatorForLanguageModeling(
         tokenizer,
         mlm=True,
-        mlm_probability=0.3,
+        mlm_probability=0.4,
         return_tensors="pt"
     )
+
+    early_stopping_callback = EarlyStoppingCallback(
+        early_stopping_patience=5,
+        early_stopping_threshold=1e-4
+    )
+
     training_arguments = TrainingArguments(
         output_dir="./results" if not ntk else "./results_ntk",
         do_train=True,
@@ -104,7 +118,7 @@ if __name__ == "__main__":
         per_device_train_batch_size=14,
         per_device_eval_batch_size=14,
         eval_accumulation_steps=14,
-        max_steps=20000,
+        max_steps=70000,  # high max steps for early stopping,
         save_strategy="steps",
         save_steps=1000,
         load_best_model_at_end=True,
@@ -113,14 +127,6 @@ if __name__ == "__main__":
         save_total_limit=1,
         torch_compile_backend="inductor",
     )
-
-    train_dataset = load_from_disk(
-        "../../../NLPLearn/visobert-token-classification/data/tokenized_dataset_train"
-    )
-    val_dataset = load_from_disk(
-        "../../../NLPLearn/visobert-token-classification/data/tokenized_dataset_val"
-    )
-
     trainer = Trainer(
         args=training_arguments,
         model=wrapper,
@@ -128,6 +134,8 @@ if __name__ == "__main__":
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         optimizers=(optimizer, None),
-        compute_metrics=compute_metrics(tokenizer)
+        callbacks=[early_stopping_callback],
+        compute_metrics=compute_metrics()
     )
+
     trainer.train()
