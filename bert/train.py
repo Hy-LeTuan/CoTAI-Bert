@@ -56,6 +56,7 @@ if __name__ == "__main__":
     beta = 32
     scale = 16
     mscale = 0.707
+    mlm_probability = 0.2
 
     model = CotaiBert(num_blocks,
                       hidden_state,
@@ -94,7 +95,7 @@ if __name__ == "__main__":
     collator = DataCollatorForLanguageModeling(
         tokenizer,
         mlm=True,
-        mlm_probability=0.4,
+        mlm_probability=mlm_probability,
         return_tensors="pt"
     )
 
@@ -103,14 +104,21 @@ if __name__ == "__main__":
         early_stopping_threshold=1e-4
     )
 
+    output_dir = f"results_{''.join(str(mlm_probability).split('.'))}"
+
+    if ntk:
+        output_dir += "_ntk"
+    elif yarn:
+        output_dir += "_yarn"
+
     training_arguments = TrainingArguments(
-        output_dir="./results" if not ntk else "./results_ntk",
+        output_dir=output_dir,
+        logging_dir=f"{output_dir}/runs/",
         do_train=True,
         do_eval=True,
         eval_strategy="steps",
-        eval_steps=500,
         logging_strategy="steps",
-        logging_steps=0.2,
+        logging_steps=0.02,
         torch_compile=True,
         dataloader_pin_memory=True,
         dataloader_num_workers=14,
@@ -120,7 +128,7 @@ if __name__ == "__main__":
         eval_accumulation_steps=14,
         max_steps=70000,  # high max steps for early stopping,
         save_strategy="steps",
-        save_steps=1000,
+        save_steps=0.02,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
