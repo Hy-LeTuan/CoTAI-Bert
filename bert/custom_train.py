@@ -8,6 +8,7 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 
+
 class MLMDataset(Dataset):
     def __init__(self, dataset, mlm_probability=0.3, mask_id=52290):
         self.dataset = dataset

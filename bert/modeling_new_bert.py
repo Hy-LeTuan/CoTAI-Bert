@@ -969,7 +969,7 @@ class Hfwrapper(nn.Module):
     def __init__(self, model):
         super().__init__()
         self.model = model
-        self.loss = nn.CrossEntropyLoss(ignore_index=52289)
+        self.loss = nn.CrossEntropyLoss(ignore_index=-100)
 
     def forward(self, input_ids, attention_mask, labels, **kwargs):
         bs, seq_len = input_ids.shape
