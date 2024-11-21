@@ -56,7 +56,7 @@ if __name__ == "__main__":
     beta = 32
     scale = 16
     mscale = 0.707
-    mlm_probability = 0.2
+    mlm_probability = 0.3
 
     model = CotaiBert(num_blocks,
                       hidden_state,
@@ -100,7 +100,7 @@ if __name__ == "__main__":
     )
 
     early_stopping_callback = EarlyStoppingCallback(
-        early_stopping_patience=5,
+        early_stopping_patience=3,
         early_stopping_threshold=1e-4
     )
 

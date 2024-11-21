@@ -15,16 +15,6 @@ def mlm_tokenize_dataset(batch):
 
     return tokenizer_output
 
-# def align_labels_with_words(labels, word_ids):
-#     return
-#     new_labels = []
-#     current_word = None
-#
-#     for word_id in word_ids:
-#         if word_id != current_word:
-#             current_word = word_id
-#             label = -100 if word_id is None else lables[word_id]
-
 
 if __name__ == "__main__":
     df = read_and_return_df(text_files=text_files)

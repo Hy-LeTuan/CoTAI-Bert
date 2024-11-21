@@ -1,12 +1,20 @@
 from datasketch import MinHashLSH, MinHash, LeanMinHash
-from datasets import load_dataset, load_from_disk, Dataset
-from regex import W
 from tqdm import tqdm
 import multiprocessing as mp
 
 
 class DeduplicateWithCassandra:
-    def __init__(self, dataset, similarity_threshold, num_perms, shingle_size, keyspace, replication_factor: str = "1", strategy: str = "SimpleStrategy", port: str = "127.0.0.1"):
+    def __init__(
+            self,
+            dataset,
+            similarity_threshold,
+            num_perms,
+            shingle_size,
+            keyspace,
+            replication_factor: str = "1",
+            strategy: str = "SimpleStrategy",
+            port: str = "127.0.0.1"
+    ):
         self.dataset = dataset
 
         self.similarity_threshold = similarity_threshold
