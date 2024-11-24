@@ -1,6 +1,6 @@
 from modeling_new_bert import CotaiBert, Hfwrapper
 from transformers import DataCollatorForLanguageModeling, Trainer, AutoTokenizer, TrainingArguments, EarlyStoppingCallback
-from datasets import load_from_disk
+from datasets import load_dataset
 import torch
 import numpy as np
 from sklearn.metrics import precision_recall_fscore_support
@@ -85,11 +85,11 @@ if __name__ == "__main__":
         "../tokenizer/trained_tokenizer/tokenizer-50k"
     )
 
-    train_dataset = load_from_disk(
-        "../../../NLPLearn/visobert-token-classification/data/tokenized_dataset_train"
+    train_dataset = load_dataset(
+        "../data_all/data_ner/train", cache_dir=None, streaming=False, split="train"
     )
-    val_dataset = load_from_disk(
-        "../../../NLPLearn/visobert-token-classification/data/tokenized_dataset_val"
+    val_dataset = load_dataset(
+        "../data_all/data_ner/test", cache_dir=None, streaming=False, split="train"
     )
 
     collator = DataCollatorForLanguageModeling(

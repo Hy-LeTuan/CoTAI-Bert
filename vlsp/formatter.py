@@ -40,11 +40,11 @@ def extract_and_reformat(text_file_paths, destination):
             output_file.close()
 
 
-def read_and_join_list(text_file_paths, destination):
+def read_and_join_list(text_file_paths, destination, year):
     for file_counter, filepath in enumerate(text_file_paths):
         with open(filepath, "r", encoding="utf-8") as input_file:
             output_file = open(
-                f"./data/formatted_data/2016/new/{destination}/{str(file_counter).zfill(5)}.txt",
+                f"./data/formatted_data/{year}/{destination}/{str(file_counter).zfill(5)}.txt",
                 "w",
                 encoding="utf-8"
             )
@@ -90,15 +90,22 @@ def read_and_join_list(text_file_paths, destination):
                     else:
                         content = input_file.readline()
 
+def extract_and_reformat_muc(text_file_paths, destination, year):
+    for file_counter, filepath in enumerate(text_file_paths):
+        pass
+
 
 if __name__ == "__main__":
-    # get all .txt file paths in NER 2016 dataset
-
-    origin = ["./data/NER2016-TrainingData-3-3-2017-txt/**/*.txt",
-              "./data/NER2016-TestData-16-9-2016/**/*.txt"]
+    year = 2018
+    # origin = ["./data/NER2016-TrainingData-3-3-2017-txt/**/*.txt",
+    #           "./data/NER2016-TestData-16-9-2016/**/*.txt"]
+    origin = [
+        "./data/VLSP2018-NER-dev/**/*.muc",
+        "./data/VLSP2018-NER-train/VLSP2018-NER-train-Jan14/**/*.muc",
+    ]
     destination = ["train", "test"]
 
     for o, d in zip(origin, destination):
         text_file_paths = sorted(glob(o, recursive=True))
-        # extract_and_reformat(text_file_paths, destination=d)
-        read_and_join_list(text_file_paths=text_file_paths, destination=d)
+        # extract_and_reformat(text_file_paths, destination=d, year=year)
+        # read_and_join_list(text_file_paths=text_file_paths, destination=d)
