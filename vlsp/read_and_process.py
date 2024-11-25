@@ -8,8 +8,7 @@ spark = SparkSession.builder.getOrCreate()
 spark.sparkContext.setLogLevel("OFF")
 
 
-
-def read_and_return_df(text_files: list) -> DataFrame:
+def read_format_and_return_df(text_files: list) -> DataFrame:
     def split_and_divide(row) -> Row:
         content = row["value"]
         word_list, tag_list = content.split("\t")
@@ -34,9 +33,15 @@ def read_and_return_df(text_files: list) -> DataFrame:
     return df
 
 
+def read_and_return_df(text_files: list) -> DataFrame:
+    df = spark.read.text(text_files)
+    df = df.dropna(how='any')  # Drop rows with any null values
+    return df
+
+
 if __name__ == "__main__":
     dataset_type = "train"
     text_files = sorted(glob(os.path.join("./data/formatted_data/2016/new", dataset_type, "**", "*.txt"), recursive=True))
-    df = read_and_return_df(text_files)
+    df = read_format_and_return_df(text_files)
 
     df.show()

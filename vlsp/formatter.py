@@ -1,9 +1,8 @@
 from glob import glob
+import regex as re
 
 
 # read file and extract tags
-
-
 def extract_and_reformat(text_file_paths, destination):
     for file_counter, filepath in enumerate(text_file_paths):
         with open(filepath, "r", encoding="utf-8") as f:
@@ -90,9 +89,34 @@ def read_and_join_list(text_file_paths, destination, year):
                     else:
                         content = input_file.readline()
 
+
 def extract_and_reformat_muc(text_file_paths, destination, year):
+    re_pattern_with_tag = r"(<ENAMEX[^>]*>.*?<\/ENAMEX>)"
     for file_counter, filepath in enumerate(text_file_paths):
-        pass
+        with open(filepath, "r", encoding="utf-8") as input_file:
+            output_file = open(
+                f"./data/formatted_data/{year}/{destination}/{str(file_counter).zfill(5)}.txt",
+                "w",
+                encoding="utf-8"
+            )
+
+            line = input_file.readline()
+
+            while line:
+                regex_res_with_tag = re.findall(re_pattern_with_tag, line)
+
+                if regex_res_with_tag:
+                    for tag_phrase in regex_res_with_tag:
+                        content = re.findall(r"<ENAMEX[^>]*>(.*?)<\/ENAMEX>", tag_phrase)[-1]
+
+                        # replace the whole tag with only the content for MLM task
+                        line = line.replace(tag_phrase, content)
+
+                # write line with no tag and only words
+                if len(line) > 0:
+                    output_file.write(f"{line}")
+
+                line = input_file.readline()
 
 
 if __name__ == "__main__":
@@ -109,3 +133,8 @@ if __name__ == "__main__":
         text_file_paths = sorted(glob(o, recursive=True))
         # extract_and_reformat(text_file_paths, destination=d, year=year)
         # read_and_join_list(text_file_paths=text_file_paths, destination=d)
+        extract_and_reformat_muc(
+            text_file_paths=text_file_paths,
+            destination=d,
+            year=year
+        )
