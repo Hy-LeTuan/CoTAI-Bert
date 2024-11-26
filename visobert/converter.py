@@ -1,5 +1,4 @@
 import pyarrow as pa
-import pyarrow.feather as feather
 import tqdm as tqdm
 
 
