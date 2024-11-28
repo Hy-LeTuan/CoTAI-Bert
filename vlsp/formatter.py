@@ -73,7 +73,7 @@ def read_and_join_list(text_file_paths, destination, year):
                             tag = content[3]
 
                             # replace quotation with double quotations
-                            word = word.replace('"', '""')
+                            # word = word.replace('"', '""')
 
                             word_list.append(word)
                             tag_list.append(tag)
@@ -82,10 +82,11 @@ def read_and_join_list(text_file_paths, destination, year):
                             content = input_file.readline()
 
                         # write output to a file
-                        word_list_concat = " ".join(word_list)
-                        tag_list_concat = " ".join(tag_list)
+                        word_list_concat = "JOIN".join(word_list)
+                        tag_list_concat = "JOIN".join(tag_list)
 
-                        output_file.write(f"{word_list_concat}\t{tag_list_concat}\n")
+                        output_file.write(
+                            f"{word_list_concat}UNIQUE_CONNECTOR{tag_list_concat}\n")
                     else:
                         content = input_file.readline()
 
@@ -107,7 +108,8 @@ def extract_and_reformat_muc(text_file_paths, destination, year):
 
                 if regex_res_with_tag:
                     for tag_phrase in regex_res_with_tag:
-                        content = re.findall(r"<ENAMEX[^>]*>(.*?)<\/ENAMEX>", tag_phrase)[-1]
+                        content = re.findall(
+                            r"<ENAMEX[^>]*>(.*?)<\/ENAMEX>", tag_phrase)[-1]
 
                         # replace the whole tag with only the content for MLM task
                         line = line.replace(tag_phrase, content)
@@ -120,21 +122,21 @@ def extract_and_reformat_muc(text_file_paths, destination, year):
 
 
 if __name__ == "__main__":
-    year = 2018
-    # origin = ["./data/NER2016-TrainingData-3-3-2017-txt/**/*.txt",
-    #           "./data/NER2016-TestData-16-9-2016/**/*.txt"]
-    origin = [
-        "./data/VLSP2018-NER-dev/**/*.muc",
-        "./data/VLSP2018-NER-train/VLSP2018-NER-train-Jan14/**/*.muc",
-    ]
+    year = 2016
+    origin = ["./data/NER2016-TrainingData-3-3-2017-txt/**/*.txt",
+              "./data/NER2016-TestData-16-9-2016/**/*.txt"]
+    # origin = [
+    #     "./data/VLSP2018-NER-dev/**/*.muc",
+    #     "./data/VLSP2018-NER-train/VLSP2018-NER-train-Jan14/**/*.muc",
+    # ]
     destination = ["train", "test"]
 
     for o, d in zip(origin, destination):
         text_file_paths = sorted(glob(o, recursive=True))
-        # extract_and_reformat(text_file_paths, destination=d, year=year)
-        # read_and_join_list(text_file_paths=text_file_paths, destination=d)
-        extract_and_reformat_muc(
-            text_file_paths=text_file_paths,
-            destination=d,
-            year=year
-        )
+        read_and_join_list(text_file_paths=text_file_paths,
+                           destination=d, year=year)
+        # extract_and_reformat_muc(
+        #     text_file_paths=text_file_paths,
+        #     destination=d,
+        #     year=year
+        # )

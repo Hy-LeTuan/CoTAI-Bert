@@ -8,14 +8,14 @@ spark = SparkSession.builder.getOrCreate()
 spark.sparkContext.setLogLevel("OFF")
 
 
-def read_format_and_return_df(text_files: list) -> DataFrame:
+def read_format_and_return_df(text_files: list, remove_tags=False) -> DataFrame:
     def split_and_divide(row) -> Row:
         content = row["value"]
-        word_list, tag_list = content.split("\t")
+        word_list, tag_list = content.split("UNIQUE_CONNECTOR")
 
         # split each list into actual list
-        word_list = word_list.split(" ")
-        tag_list = tag_list.split(" ")
+        word_list = word_list.split("JOIN")
+        tag_list = tag_list.split("JOIN")
 
         return Row(words=word_list, tags=tag_list)
 
@@ -29,8 +29,29 @@ def read_format_and_return_df(text_files: list) -> DataFrame:
 
     # convert back to dataframe
     df = rdd.toDF(schema=schema)
+    df = df.dropna(how='any')  # Drop rows with any null values
+
+    if remove_tags:
+        df = df.drop("tags")
 
     return df
+
+
+def get_label_map():
+    label_map = {
+
+        "B-PER": 0,
+        "I-PER": 1,
+        "B-ORG": 2,
+        "I-ORG": 3,
+        "B-LOC": 4,
+        "I-LOC": 5,
+        "O": 6,
+        "B-MISC": 7,
+        "I-MISC": 8,
+    }
+
+    return label_map
 
 
 def read_and_return_df(text_files: list) -> DataFrame:
@@ -41,7 +62,8 @@ def read_and_return_df(text_files: list) -> DataFrame:
 
 if __name__ == "__main__":
     dataset_type = "train"
-    text_files = sorted(glob(os.path.join("./data/formatted_data/2016/new", dataset_type, "**", "*.txt"), recursive=True))
+    text_files = sorted(glob(os.path.join(
+        "./data/formatted_data/2016/new", dataset_type, "**", "*.txt"), recursive=True))
     df = read_format_and_return_df(text_files)
 
     df.show()

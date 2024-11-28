@@ -1,11 +1,16 @@
 import sys
 import os
-sys.path.append(os.path.join(os.getcwd(), ".."))
-from vlsp import read_and_process 
 from glob import glob
 from datasets import Dataset
 from transformers import AutoTokenizer
 
+sys.path.append(os.path.join(os.getcwd(), ".."))
+
+try:
+    from vlsp import read_and_process
+except ImportError as e:
+    print(e)
+    sys.exit(1)
 
 tokenizer = AutoTokenizer.from_pretrained("../tokenizer/trained_tokenizer/tokenizer-50k")
 
